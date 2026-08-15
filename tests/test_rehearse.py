@@ -15,9 +15,10 @@ from chameleon.state import TaskStatus, load_state
 class FakeMCP:
     instances: list["FakeMCP"] = []
 
-    def __init__(self, *, user_data_dir: Path, output_dir: Path) -> None:
+    def __init__(self, *, user_data_dir: Path, output_dir: Path, headless: bool = False, cdp_endpoint: str | None = None, **_: object) -> None:
         self.user_data_dir = user_data_dir
         self.output_dir = output_dir
+        self.headless = headless
         self.url = "about:blank"
         self.calls: list[tuple[str, dict]] = []
         self.restored = False
@@ -75,25 +76,32 @@ def _install_fakes(monkeypatch, tmp_path, *, proposals, answers, planner_calls):
         "i": 0,
         "last_history": 0,
         "last_index": 0,
+        "last_answers": 0,
         "last_was_empty_complete": False,
+        "last_was_blocked": False,
         "started": False,
     }
 
     def fake_navigator(**kwargs):
         hist = len(kwargs["history"])
         idx = kwargs["subgoal_index"]
+        answers = len(kwargs["guardian_answers"])
         if nav_state["started"]:
             if hist > nav_state["last_history"]:
                 nav_state["i"] += 1
             elif idx > nav_state["last_index"] and nav_state["last_was_empty_complete"]:
                 nav_state["i"] += 1
+            elif answers > nav_state["last_answers"] and nav_state["last_was_blocked"]:
+                nav_state["i"] += 1
         nav_state["started"] = True
         nav_state["last_history"] = hist
         nav_state["last_index"] = idx
+        nav_state["last_answers"] = answers
         if nav_state["i"] >= len(proposals):
             return NavigatorProposal(tool=None, reason="stall", subgoal_complete=True)
         proposal = proposals[nav_state["i"]]
         nav_state["last_was_empty_complete"] = proposal.tool is None and proposal.subgoal_complete
+        nav_state["last_was_blocked"] = proposal.tool is None and not proposal.subgoal_complete
         return proposal
 
     monkeypatch.setattr("chameleon.loop.navigator_step", fake_navigator)
@@ -275,3 +283,31 @@ def test_kill_during_ask_then_resume_without_replanning(tmp_path, monkeypatch):
     assert second.status == TaskStatus.completed
     assert FakeMCP.instances[-1].restored is True
     assert any(a.answer == "Bolt T-Shirt" for a in second.guardian_answers)
+
+
+def test_blocked_navigator_asks_instead_of_snapshot_loop(tmp_path, monkeypatch):
+    planner_calls: list[str] = []
+    _install_fakes(
+        monkeypatch,
+        tmp_path,
+        proposals=[
+            NavigatorProposal(
+                tool="browser_navigate",
+                arguments={"url": load_profile("greenhouse").base_url},
+                reason="open",
+                subgoal_complete=True,
+            ),
+            NavigatorProposal(tool=None, reason="need name email phone", subgoal_complete=False),
+            NavigatorProposal(
+                tool="browser_type",
+                arguments={"element": "First name", "target": "e1", "text": "Jane"},
+                reason="fill",
+                subgoal_complete=True,
+            ),
+        ],
+        answers=["Jane Tester, jane@example.com, 555-0100", "__STOP__"],
+        planner_calls=planner_calls,
+    )
+    state = asyncio.run(run_task("greenhouse", "apply to this job for me", "demo-ask-loop"))
+    assert any(a.answer.startswith("Jane Tester") for a in state.guardian_answers)
+    assert any(name == "browser_type" for name, _ in FakeMCP.instances[-1].calls)

@@ -36,14 +36,16 @@ Return ONLY one JSON object. No markdown, no second object, no commentary.
 
 Set subgoal_complete true when the current sub-goal is already done (tool may be null).
 Do not invent credentials — use only those provided.
-Do not skip Guardian-sensitive work by guessing when answers are missing.
+Do not invent personal info (name, email, phone, address). If guardian_answers do not
+contain it, return tool=null and subgoal_complete=false — do NOT snapshot-loop. Guardian
+will ask the user; on the next turn, fill fields from those answers.
 After a successful login, prefer the inventory/app page over logging in again.
 The accessibility snapshot is already in the user message — do not call browser_snapshot
 unless the previous action changed the page and you have no current snapshot.
 For dropdowns/comboboxes: click the control, then browser_type the value from guardian answers.
-If a resume/file upload is required and you have no file path in guardian answers, do not loop
-on snapshots; propose nothing with subgoal_complete false only after you have asked via context
-— otherwise mark subgoal_complete true when the field is optional or already filled.
+If a resume/file upload is required and you have no file path in guardian answers, return
+tool=null and subgoal_complete=false so Guardian can ask. Mark complete only if optional
+or already filled.
 """
 
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from chameleon.ask_options import extract_ask_options
 from chameleon.llm import complete, parse_json_object
 from chameleon.narration import say
 from chameleon.profiles import ChecklistItem
@@ -18,6 +19,7 @@ You have NO browser tools. You only return JSON:
 {
   "decision": "PROCEED" | "ASK",
   "question": "one concrete question if ASK, else null",
+  "options": ["short clickable reply", "..."],
   "reason": "short why"
 }
 
@@ -25,9 +27,14 @@ Rules:
 - ASK on genuine ambiguity (multiple matching items, unclear choice).
 - ASK when user-specific info is required and is not already in guardian_answers
   (name, email, phone, address, zip, resume path, cover letter text, etc.).
+- If the Navigator proposed no tool because that info is missing, ASK. Put every
+  missing field in one question (e.g. first name, last name, email, and phone).
 - ASK before irreversible actions (place order, submit application, pay, delete).
 - If the user already answered this, PROCEED and apply their answer.
 - Do not ASK vague questions. Ask one specific question.
+- If the user must pick among discrete choices (which item, yes/no to submit), put
+  those short replies in options (2–6 items). Name the actual choices.
+- If they must type free-form info (zip, email, phone, name), omit options or use [].
 - If the proposed action is still gathering page info (snapshot/navigate) and does
   not commit anything, PROCEED.
 """
@@ -37,6 +44,7 @@ class GuardianVerdict(BaseModel):
     decision: Literal["PROCEED", "ASK"]
     question: str | None = None
     reason: str = ""
+    options: list[str] = Field(default_factory=list)
 
 
 def _parse_verdict(data: dict[str, Any]) -> GuardianVerdict:
@@ -52,10 +60,16 @@ def _parse_verdict(data: dict[str, Any]) -> GuardianVerdict:
         question = str(question).strip() or None
     if decision == "ASK" and not question:
         question = "How should I proceed with this step?"
+    raw_opts = data.get("options") or []
+    if isinstance(raw_opts, str):
+        raw_opts = [raw_opts]
+    extra = [str(item) for item in raw_opts if str(item).strip()]
+    options = extract_ask_options(question or "", extra) if decision == "ASK" else []
     return GuardianVerdict(
         decision=decision,  # type: ignore[arg-type]
         question=question,
         reason=str(data.get("reason") or ""),
+        options=options,
     )
 
 

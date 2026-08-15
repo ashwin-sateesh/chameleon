@@ -25,6 +25,10 @@ def data_dir() -> Path:
     return repo_root() / "data"
 
 
+def chats_dir() -> Path:
+    return data_dir() / "chats"
+
+
 def task_state_path(task_id: str) -> Path:
     return data_dir() / "tasks" / f"{task_id}.json"
 
