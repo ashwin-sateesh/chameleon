@@ -39,6 +39,8 @@ chameleon ui
 
 Then visit `http://127.0.0.1:8765`. Each **New chat** is its own `task_id` (resume, cookies, and transcript stay with that chat). Guardian questions are answered in the same composer. Type `stop` to halt a run.
 
+This console is local-only. It needs Python, Chromium, Playwright MCP, and your LLM key on the machine that runs `chameleon ui`. GitHub Pages cannot host it.
+
 ## Docs
 
 - [docs/requirements.md](docs/requirements.md) — acceptance contract

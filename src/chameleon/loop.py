@@ -27,6 +27,7 @@ from chameleon.state import (
     new_state,
     save_state,
 )
+from chameleon.repeat_click import complete_after_repeat_click, is_repeat_click
 from chameleon.ui.events import UiBridge, current_bridge, emit
 
 MAX_ACTIONS_TOTAL = 80
@@ -391,20 +392,41 @@ async def _run_task_inner(
                             say("system", str(exc))
                             snapshot = await mcp.snapshot()
                             continue
-                        result = await mcp.call_tool(proposal.tool, arguments)
-                        excerpt = (result or "")[:400]
-                        state.navigator_action_history.append(
-                            ActionRecord(
-                                tool=proposal.tool,
-                                arguments=arguments,
-                                reason=proposal.reason,
-                                result_excerpt=excerpt,
+                        if is_repeat_click(
+                            proposal.tool,
+                            arguments,
+                            proposal.reason,
+                            history,
+                            subgoal,
+                        ):
+                            say(
+                                "system",
+                                "Skipping repeated click — that control toggles, and the last click already ran.",
                             )
-                        )
-                        actions_total += 1
-                        actions_subgoal += 1
-                        snapshot = await mcp.snapshot()
-                        await _persist_browser(mcp, state, snapshot)
+                            actions_subgoal += 1
+                            snapshot = await mcp.snapshot()
+                            if complete_after_repeat_click(subgoal, arguments, proposal.reason):
+                                proposal.subgoal_complete = True
+                                proposal.tool = None
+                            else:
+                                continue
+                        else:
+                            result = await mcp.call_tool(proposal.tool, arguments)
+                            excerpt = (result or "")[:400]
+                            state.navigator_action_history.append(
+                                ActionRecord(
+                                    tool=proposal.tool,
+                                    arguments=arguments,
+                                    reason=proposal.reason,
+                                    result_excerpt=excerpt,
+                                )
+                            )
+                            actions_total += 1
+                            actions_subgoal += 1
+                            if proposal.tool in {"browser_click", "browser_type"}:
+                                await asyncio.sleep(0.35)
+                            snapshot = await mcp.snapshot()
+                            await _persist_browser(mcp, state, snapshot)
 
                     if proposal.subgoal_complete:
                         _advance_subgoal(state)

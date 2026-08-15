@@ -46,6 +46,10 @@ For dropdowns/comboboxes: click the control, then browser_type the value from gu
 If a resume/file upload is required and you have no file path in guardian answers, return
 tool=null and subgoal_complete=false so Guardian can ask. Mark complete only if optional
 or already filled.
+Never repeat the last executed click. "Add to cart" toggles to "Remove" — a second click
+removes the item. If you already clicked Add to cart, or that item's button now says
+Remove, or the cart shows a count, set subgoal_complete true and do not click again.
+Do not click Remove unless the user asked to remove the item.
 """
 
 

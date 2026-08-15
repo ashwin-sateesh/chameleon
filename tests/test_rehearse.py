@@ -134,7 +134,7 @@ def _install_fakes(monkeypatch, tmp_path, *, proposals, answers, planner_calls):
 
     ans_i = {"n": 0}
 
-    async def fake_ask(question: str) -> str:
+    async def fake_ask(question: str, options=None) -> str:
         if ans_i["n"] >= len(answers):
             raise StopRequested
         reply = answers[ans_i["n"]]
