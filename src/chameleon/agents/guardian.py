@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from urllib.parse import urlparse
+
 from chameleon.ask_options import extract_ask_options
 from chameleon.llm import complete, parse_json_object
 from chameleon.narration import say
@@ -20,7 +22,8 @@ You have NO browser tools. You only return JSON:
   "decision": "PROCEED" | "ASK",
   "question": "one concrete question if ASK, else null",
   "options": ["short clickable reply", "..."],
-  "reason": "short why"
+  "reason": "short why",
+  "micro_goal": null
 }
 
 Rules:
@@ -41,17 +44,22 @@ Rules:
 
 
 class GuardianVerdict(BaseModel):
-    decision: Literal["PROCEED", "ASK"]
+    decision: Literal["PROCEED", "ASK", "WAIT", "DONE"]
     question: str | None = None
     reason: str = ""
     options: list[str] = Field(default_factory=list)
+    micro_goal: str | None = None
 
 
 def _parse_verdict(data: dict[str, Any]) -> GuardianVerdict:
     decision = str(data.get("decision") or "").strip().upper()
-    if decision not in {"PROCEED", "ASK"}:
-        text = str(data)
-        if "ASK" in text.upper():
+    if decision not in {"PROCEED", "ASK", "WAIT", "DONE"}:
+        text = str(data).upper()
+        if "DONE" in text:
+            decision = "DONE"
+        elif "WAIT" in text:
+            decision = "WAIT"
+        elif "ASK" in text:
             decision = "ASK"
         else:
             decision = "PROCEED"
@@ -65,11 +73,15 @@ def _parse_verdict(data: dict[str, Any]) -> GuardianVerdict:
         raw_opts = [raw_opts]
     extra = [str(item) for item in raw_opts if str(item).strip()]
     options = extract_ask_options(question or "", extra) if decision == "ASK" else []
+    goal = data.get("micro_goal")
+    if goal is not None:
+        goal = str(goal).strip() or None
     return GuardianVerdict(
         decision=decision,  # type: ignore[arg-type]
         question=question,
         reason=str(data.get("reason") or ""),
         options=options,
+        micro_goal=goal,
     )
 
 
@@ -98,4 +110,129 @@ Decide PROCEED or ASK.
     raw = complete(prompt, system=SYSTEM)
     verdict = _parse_verdict(parse_json_object(raw))
     say("guardian", f"{verdict.decision}: {verdict.reason or verdict.question or 'ok'}")
+    return verdict
+
+
+COPILOT_INTERPRET_SYSTEM = """You are the Guardian in a terminal-led copilot.
+The user talks in the terminal. The agent drives the website after one confirm.
+
+You have NO browser tools. Return ONLY JSON:
+{
+  "decision": "PROCEED" | "ASK" | "WAIT" | "DONE",
+  "question": "one short sentence if ASK, else null",
+  "reason": "few words",
+  "micro_goal": "concrete browser burst if PROCEED or ASK"
+}
+
+Decisions:
+- DONE: user wants to finish.
+- WAIT: user said they will click themselves (rare).
+- ASK: request is still missing a needed fact (which listing, missing dates). One sentence.
+- PROCEED: they said what to do, or answered yes/ok/do it/go ahead/you do it to the pending question.
+
+Rules:
+- A concrete instruction ("food", "guest favorite", "find pizza", "restaurants in SF") IS consent. PROCEED with that micro_goal. Do not ask "or will you?"
+- "yes" / "ok" / "do it" / "go ahead" → PROCEED using suggested_micro_goal or the pending question's action.
+- "skip it" / "skip" / "that's fine" / "never mind" / "without that" / "continue" → WAIT (do not hunt for the missing filter). Unless they also named a visible extra — then PROCEED with that extra.
+- Do not invent book/pay/share/submit as the micro_goal.
+- micro_goal is one short burst.
+- Questions must be one sentence, max ~20 words.
+"""
+
+
+def guardian_copilot_interpret(
+    *,
+    pending_question: str | None,
+    user_reply: str,
+    user_state: str | None,
+    possible_intents: list[str],
+    suggested_micro_goal: str | None,
+    guardian_answers: list[GuardianAnswer],
+    task: str,
+    site_name: str,
+) -> GuardianVerdict:
+    answers = "\n".join(f"- Q: {a.question} A: {a.answer}" for a in guardian_answers[-8:]) or "(none yet)"
+    intents = ", ".join(possible_intents) or "(none)"
+    prompt = f"""User task: {task}
+Site: {site_name}
+Current user_state: {user_state or "(unknown)"}
+Possible intents: {intents}
+Suggested micro_goal from planner: {suggested_micro_goal or "(none)"}
+Question the user was answering (if any): {pending_question or "(none — this is a freeform instruction)"}
+User message: {user_reply}
+
+Existing answers:
+{answers}
+
+Decide DONE, WAIT, ASK (only if still ambiguous), or PROCEED (act now).
+"""
+    raw = complete(prompt, system=COPILOT_INTERPRET_SYSTEM)
+    verdict = _parse_verdict(parse_json_object(raw))
+    if verdict.decision == "PROCEED" and not verdict.micro_goal:
+        verdict.micro_goal = suggested_micro_goal
+    if verdict.decision == "ASK" and not verdict.micro_goal:
+        verdict.micro_goal = suggested_micro_goal
+    say("guardian", f"{verdict.decision}: {verdict.reason or verdict.question or 'ok'}")
+    return verdict
+
+
+_IRREVERSIBLE_MARKERS = (
+    "request to book",
+    "reserve",
+    "purchase",
+    "proceed to checkout",
+    "complete checkout",
+    "place order",
+    "confirm and pay",
+    "pay now",
+    "submit application",
+    "contact host",
+    "delete",
+)
+
+_DATE_PICKER_SAFE = (
+    "check-in",
+    "check in",
+    "check-out",
+    "check out",
+    "checkout date",
+)
+
+_KNOWN_HOSTS = ("google.com", "airbnb.com", "openstreetmap.org")
+
+
+def guardian_copilot_action(
+    *,
+    proposed_action: dict[str, Any],
+    micro_goal: str,
+    task: str,
+) -> GuardianVerdict:
+    """Heuristic after the user already consented to the burst — no LLM."""
+    del task  # burst already consented
+    tool = str(proposed_action.get("tool") or "")
+    args = proposed_action.get("arguments") or {}
+    reason = str(proposed_action.get("reason") or "")
+    blob = f"{tool} {args} {reason} {micro_goal}".lower()
+    if any(safe in blob for safe in _DATE_PICKER_SAFE):
+        verdict = GuardianVerdict(decision="PROCEED", reason="consented burst")
+        return verdict
+    if any(marker in blob for marker in _IRREVERSIBLE_MARKERS):
+        verdict = GuardianVerdict(
+            decision="ASK",
+            question="This looks irreversible (book, pay, share, or leave). Continue?",
+            reason="irreversible heuristic",
+        )
+        say("guardian", f"{verdict.decision}: {verdict.reason}")
+        return verdict
+    if tool == "browser_navigate":
+        host = urlparse(str(args.get("url") or "")).netloc.lower()
+        if host and not any(known in host for known in _KNOWN_HOSTS):
+            verdict = GuardianVerdict(
+                decision="ASK",
+                question="This leaves the current site. Continue?",
+                reason="off-site navigate",
+            )
+            say("guardian", f"{verdict.decision}: {verdict.reason}")
+            return verdict
+    verdict = GuardianVerdict(decision="PROCEED", reason="consented burst")
     return verdict

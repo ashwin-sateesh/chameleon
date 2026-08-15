@@ -37,6 +37,10 @@ class StopRequested(Exception):
     """SIGINT / cooperative shutdown."""
 
 
+class MissingTaskError(ValueError):
+    """Raised when an execute site is launched without --task."""
+
+
 async def _ask_user(question: str, options: list[str] | None = None) -> str:
     narrate_ask(question)
     bridge = current_bridge.get()
@@ -155,7 +159,8 @@ async def _restore_browser(mcp: PlaywrightMCP, state: TaskState, profile: SitePr
         except Exception:  # noqa: BLE001
             await asyncio.sleep(0.6)
     else:
-        await asyncio.sleep(0.6)
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            await asyncio.sleep(0.6)
     if live is not None and state.page_state:
         try:
             await live.restore_page_state(state.page_state)
@@ -250,7 +255,7 @@ def _advance_subgoal(state: TaskState) -> None:
 
 async def run_task(
     site: str,
-    task: str,
+    task: str | None,
     task_id: str,
     *,
     headless: bool = False,
@@ -265,12 +270,31 @@ async def run_task(
 
 async def _run_task_inner(
     site: str,
-    task: str,
+    task: str | None,
     task_id: str,
     *,
     headless: bool,
 ) -> TaskState:
     profile: SiteProfile = load_profile(site)
+    resolved = (task or "").strip()
+    if not resolved:
+        if profile.interaction_mode == "copilot":
+            resolved = profile.default_task or f"accompany the user on {profile.name}"
+        else:
+            raise MissingTaskError(
+                f"--task is required for execute site {profile.id!r}. "
+                "Copilot sites (interaction_mode: copilot) may omit it."
+            )
+    if profile.interaction_mode == "copilot":
+        from chameleon.copilot_loop import run_copilot
+
+        return await run_copilot(profile, resolved, task_id, headless=headless)
+    return await _run_execute(profile, resolved, task_id, headless=headless)
+
+
+async def _run_execute(
+    profile: SiteProfile, task: str, task_id: str, *, headless: bool = False
+) -> TaskState:
     existing = load_state(task_id)
     resuming = existing is not None
     if resuming:

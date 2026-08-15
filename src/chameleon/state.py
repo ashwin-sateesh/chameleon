@@ -16,6 +16,12 @@ class TaskStatus(str, Enum):
     failed = "failed"
 
 
+class CopilotPhase(str, Enum):
+    observing = "observing"
+    asking = "asking"
+    acting = "acting"
+
+
 class ActionRecord(BaseModel):
     tool: str
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -27,6 +33,11 @@ class GuardianAnswer(BaseModel):
     subgoal_index: int
     question: str
     answer: str
+
+
+class ObservedEvent(BaseModel):
+    url: str | None = None
+    summary: str = ""
 
 
 class TaskState(BaseModel):
@@ -44,6 +55,12 @@ class TaskState(BaseModel):
     pending_options: list[str] = Field(default_factory=list)
     error: str | None = None
     page_state: dict[str, Any] | None = None
+    phase: CopilotPhase | None = None
+    user_state: str | None = None
+    last_fingerprint: str | None = None
+    interpreted_fingerprint: str | None = None
+    consented_goal: str | None = None
+    observed_events: list[ObservedEvent] = Field(default_factory=list)
 
 
 def save_state(state: TaskState) -> None:
@@ -68,6 +85,7 @@ def new_state(
     task_id: str,
     checklist: list[ChecklistItem],
     current_url: str | None = None,
+    phase: CopilotPhase | None = None,
 ) -> TaskState:
     dump = storage_state_path(task_id)
     dump.parent.mkdir(parents=True, exist_ok=True)
@@ -79,4 +97,5 @@ def new_state(
         current_url=current_url,
         storage_state_path=str(dump),
         status=TaskStatus.running,
+        phase=phase,
     )

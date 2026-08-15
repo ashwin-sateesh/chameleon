@@ -1,0 +1,22 @@
+name: Airbnb
+base_url: https://www.airbnb.com
+requires_login: false
+task_type: exploration
+interaction_mode: copilot
+default_task: accompany the user exploring stays on Airbnb
+intent_hints:
+  - Guest favorite
+  - Luxury
+  - Superhost
+  - Instant Book
+  - price filter
+  - type of place
+  - map vs list view
+  - star rating (only if the control is already visible — do not hunt)
+  - contact host or request to book (ask first — irreversible)
+end_phrases:
+  - done
+  - quit
+  - stop
+  - that's all
+  - thats all

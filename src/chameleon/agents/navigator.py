@@ -114,3 +114,85 @@ Propose the single next tool call.
         f"{proposal.reason or 'next action'} | tool={proposal.tool} complete={proposal.subgoal_complete}",
     )
     return proposal
+
+
+COPILOT_SYSTEM = """You are the Navigator in a copilot browser assistant.
+Same rules on every copilot site (Maps, OSM, Airbnb, …).
+The user already consented to ONE micro-goal. You propose exactly ONE Playwright MCP
+tool call per turn. You never execute it.
+Allowed tools: browser_navigate, browser_click, browser_type, browser_snapshot.
+
+Playwright MCP click/type use `target` (the snapshot ref such as e12), not CSS selectors.
+You may also send `element` as a short human description.
+
+Return ONLY JSON:
+{
+  "tool": "browser_click" | "browser_type" | "browser_navigate" | "browser_snapshot" | null,
+  "arguments": { ... },
+  "reason": "short why",
+  "subgoal_complete": false
+}
+
+Core vs optional:
+- Core: search box / query, dates, guests, then submit Search. Do these.
+- Optional (stars, Guest favorite, chips, price, Open now, layers, sort): apply
+  ONLY if that control is already visible in THIS snapshot. One try. If it is
+  not in the snapshot, skip it — set subgoal_complete true after core search.
+  Do NOT open Filters / More / nested menus hunting for a missing control.
+
+Rules:
+- Complete the consented micro-goal, then set subgoal_complete true (tool may be null).
+- A filled search form is NOT complete until Search/Apply is clicked.
+- Mark complete when results/place/listing is visible, even if optional filters were skipped.
+- Guest steppers and date cells are core steps — keep going until the goal page is showing.
+- If you cannot find the next CORE control, set tool null and subgoal_complete true.
+- Do NOT click the map canvas. Search box, sidebar, cards, visible filters, directions only.
+- Do not invent extra goals. No booking, paying, sharing, or leaving the site.
+- Prefer typing in the visible search box over a crafted URL.
+- Do not call browser_snapshot if a current snapshot is already in the prompt.
+- Keep reason under 12 words.
+"""
+
+
+def navigator_copilot_step(
+    *,
+    micro_goal: str,
+    snapshot: str,
+    history: list[dict[str, Any]],
+    profile: SiteProfile,
+    task: str,
+) -> NavigatorProposal:
+    hints = "\n".join(f"- {h}" for h in profile.intent_hints) or "(none)"
+    recent = history[-20:]
+    prompt = f"""User task: {task}
+Site: {profile.name} base_url={profile.base_url}
+Consented micro-goal: {micro_goal}
+Optional extras (apply only if already visible; never hunt):
+{hints}
+
+Recent executed actions (oldest to newest):
+{recent}
+
+Current accessibility snapshot:
+{snapshot[:18000]}
+
+Propose the single next tool call, or mark the micro-goal complete.
+"""
+    raw = complete(prompt, system=COPILOT_SYSTEM)
+    data = parse_json_object(raw)
+    tool = data.get("tool")
+    if tool == "null":
+        tool = None
+    if tool is not None and tool not in NAVIGATOR_TOOLS:
+        raise ValueError(f"Navigator proposed disallowed tool: {tool!r}")
+    proposal = NavigatorProposal(
+        tool=tool,
+        arguments=data.get("arguments") or {},
+        reason=str(data.get("reason") or ""),
+        subgoal_complete=bool(data.get("subgoal_complete")),
+    )
+    say(
+        "navigator",
+        f"{proposal.reason or 'micro-goal'} | tool={proposal.tool} complete={proposal.subgoal_complete}",
+    )
+    return proposal

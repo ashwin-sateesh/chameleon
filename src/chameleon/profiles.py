@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 from chameleon.paths import configs_dir
 
 RiskLevel = Literal["none", "ambiguous_choice", "needs_user_info", "irreversible"]
+InteractionMode = Literal["execute", "copilot"]
+
+_DEFAULT_END_PHRASES = ["done", "quit", "stop", "that's all", "thats all"]
 
 
 class LoginConfig(BaseModel):
@@ -28,6 +31,10 @@ class SiteProfile(BaseModel):
     login: LoginConfig | None = None
     task_type: str
     checklist_template: list[ChecklistItem] = Field(default_factory=list)
+    interaction_mode: InteractionMode = "execute"
+    intent_hints: list[str] = Field(default_factory=list)
+    end_phrases: list[str] = Field(default_factory=lambda: list(_DEFAULT_END_PHRASES))
+    default_task: str | None = None
 
 
 class UnknownSiteError(ValueError):

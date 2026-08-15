@@ -4,7 +4,7 @@ Stateful three-agent browser automation (Planner, Navigator, Guardian) that paus
 
 ## Install
 
-Requires Python 3.11+, Node.js 18+ (`npx`), and an LLM key: `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` (Claude Sonnet 4.6) or `XAI_API_KEY` (Grok 4.6).
+Requires Python 3.11+, Node.js 18+ (`npx`), and an LLM key: `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` (Claude Opus 4.8) or `XAI_API_KEY` (Grok 4.6).
 
 ```bash
 python3 -m venv .venv
@@ -29,7 +29,12 @@ Run a task in the terminal (headed OS browser):
 ```bash
 chameleon --site saucedemo --task "buy me a t-shirt" --task-id demo1
 python -m chameleon --site greenhouse --task "apply to this job for me" --task-id demo-gh
+chameleon --site maps --task-id demo-maps
 ```
+
+Copilot sites (`maps`, `osm`, `airbnb`) share the same loop. Type what you want; the agent confirms once, then does the core search. If a requested filter is not on the page, it says so and asks — it does not keep hunting. After each burst or UI click it reads the new page, suggests at most two simple extras, and asks a follow-up until you type `done`.
+
+Resume is automatic when `data/tasks/{task_id}.json` already exists.
 
 Open the two-pane web console (live page on the left, chat on the right):
 
@@ -37,7 +42,7 @@ Open the two-pane web console (live page on the left, chat on the right):
 chameleon ui
 ```
 
-Then visit `http://127.0.0.1:8765`. Each **New chat** is its own `task_id` (resume, cookies, and transcript stay with that chat). Guardian questions are answered in the same composer. Type `stop` to halt a run.
+Then visit `http://127.0.0.1:8765`. Type `restaurants in San Francisco` or `stays near SFO` (it infers Maps / Airbnb), or pick a site when asked. Each **New chat** is its own `task_id`. Guardian questions are answered in the same composer. Type `done` or `stop` to halt a run.
 
 ## Docs
 

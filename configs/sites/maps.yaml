@@ -1,0 +1,19 @@
+name: Google Maps
+base_url: https://www.google.com/maps
+requires_login: false
+task_type: exploration
+interaction_mode: copilot
+default_task: accompany the user exploring Google Maps
+intent_hints:
+  - restaurants / food filter chips (only if visible)
+  - hotels / lodging filter chips (only if visible)
+  - things to do / tourist filter chips (only if visible)
+  - directions
+  - similar places nearby
+  - ratings / Open now chips (only if already on this page — do not hunt)
+end_phrases:
+  - done
+  - quit
+  - stop
+  - that's all
+  - thats all

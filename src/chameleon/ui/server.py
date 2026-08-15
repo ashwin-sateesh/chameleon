@@ -260,6 +260,9 @@ async def _handle_chat(text: str) -> None:
         await _new_chat()
 
     if console.busy():
+        if console.bridge.waiting_ask():
+            console.bridge.submit_answer(text)
+            return
         console.bridge.emit("log", agent="user", message=text)
         console.bridge.emit("log", agent="system", message="Still working — I'll ask if I need you.")
         return
@@ -368,7 +371,19 @@ def create_app() -> Starlette:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
+    import sys
+
     import uvicorn
+
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        print(
+            "WebSocket library missing — chat cannot connect. "
+            "From the project venv run: pip install -e '.[dev]'",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
     url = f"http://{host}:{port}"
     print(f"Chameleon console → {url}", flush=True)

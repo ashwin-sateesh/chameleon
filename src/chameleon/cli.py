@@ -7,7 +7,7 @@ import sys
 from dotenv import load_dotenv
 
 from chameleon.llm import has_llm_key
-from chameleon.loop import run_task
+from chameleon.loop import MissingTaskError, run_task
 from chameleon.paths import repo_root
 from chameleon.profiles import UnknownSiteError
 
@@ -19,7 +19,11 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Web console: chameleon ui",
     )
     parser.add_argument("--site", required=True, help="Profile id (configs/sites/<id>.yaml)")
-    parser.add_argument("--task", required=True, help="Natural-language task")
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="Natural-language task (optional for copilot sites; required for execute sites)",
+    )
     parser.add_argument("--task-id", required=True, dest="task_id", help="Resume key")
     return parser
 
@@ -56,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         asyncio.run(run_task(args.site, args.task, args.task_id))
-    except UnknownSiteError as exc:
+    except (UnknownSiteError, MissingTaskError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(2) from exc
     except KeyboardInterrupt:

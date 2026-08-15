@@ -1,0 +1,18 @@
+name: OpenStreetMap
+base_url: https://www.openstreetmap.org
+requires_login: false
+task_type: exploration
+interaction_mode: copilot
+default_task: accompany the user exploring OpenStreetMap
+intent_hints:
+  - search a city or place
+  - nearby amenities (only if visible)
+  - directions
+  - inspect a selected feature
+  - layers / map type (only if already on this page — do not hunt)
+end_phrases:
+  - done
+  - quit
+  - stop
+  - that's all
+  - thats all

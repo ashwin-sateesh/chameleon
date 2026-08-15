@@ -25,6 +25,10 @@ def test_guardian_parse_proceed_and_ask():
     ask = _parse_verdict({"decision": "ASK", "question": "Which t-shirt?", "reason": "two matches"})
     assert ask.decision == "ASK"
     assert ask.question == "Which t-shirt?"
+    wait = _parse_verdict({"decision": "WAIT", "reason": "user will click"})
+    assert wait.decision == "WAIT"
+    done = _parse_verdict({"decision": "DONE", "reason": "user finished"})
+    assert done.decision == "DONE"
 
 
 def test_parse_json_object_fenced():

@@ -7,7 +7,7 @@ import os
 import re
 from typing import Any
 
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-opus-4-8"
 GROK_MODEL = "grok-4.6"
 
 

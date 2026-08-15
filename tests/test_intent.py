@@ -16,6 +16,27 @@ def _profiles() -> list[SiteProfile]:
             base_url="https://job-boards.greenhouse.io/gitlab/jobs/8503792002",
             task_type="form_fill",
         ),
+        SiteProfile(
+            id="maps",
+            name="Google Maps",
+            base_url="https://www.google.com/maps",
+            task_type="exploration",
+            interaction_mode="copilot",
+        ),
+        SiteProfile(
+            id="airbnb",
+            name="Airbnb",
+            base_url="https://www.airbnb.com",
+            task_type="exploration",
+            interaction_mode="copilot",
+        ),
+        SiteProfile(
+            id="osm",
+            name="OpenStreetMap",
+            base_url="https://www.openstreetmap.org",
+            task_type="exploration",
+            interaction_mode="copilot",
+        ),
     ]
 
 
@@ -25,6 +46,14 @@ def test_infer_shopping_task():
 
 def test_infer_job_application():
     assert infer_site("apply to this job for me", _profiles()) == "greenhouse"
+
+
+def test_infer_maps_and_airbnb():
+    profiles = _profiles()
+    assert infer_site("restaurants in San Francisco", profiles) == "maps"
+    assert infer_site("google maps", profiles) == "maps"
+    assert infer_site("4+ star stays near SFO", profiles) == "airbnb"
+    assert infer_site("openstreetmap downtown austin", profiles) == "osm"
 
 
 def test_infer_by_url_and_name():

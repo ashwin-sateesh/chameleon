@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv",
     "pydantic>=2",
     "starlette",
-    "uvicorn",
+    "uvicorn[standard]",
     "websockets",
     "playwright",
 ]

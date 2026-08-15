@@ -9,9 +9,15 @@ from chameleon.profiles import SiteProfile, list_profile_ids, load_profile
 
 _SHOPPING = ("buy", "cart", "checkout", "t-shirt", "tshirt", "shirt", "shop", "order")
 _FORM_FILL = ("apply", "application", "job", "resume", "cover letter", "greenhouse")
+_EXPLORE = {
+    "maps": ("google maps", "maps", "restaurant", "restaurants", "directions"),
+    "airbnb": ("airbnb", "stay", "stays", "airbnb.com"),
+    "osm": ("openstreetmap", "osm"),
+}
 _TYPE_WORDS = {
     "shopping": _SHOPPING,
     "form_fill": _FORM_FILL,
+    "exploration": ("maps", "restaurant", "airbnb", "stay", "directions", "openstreetmap"),
 }
 
 
@@ -61,6 +67,9 @@ def _score(needle: str, profile: SiteProfile) -> int:
     for word in _TYPE_WORDS.get(profile.task_type, ()):
         if word in needle:
             score += 2
+    for word in _EXPLORE.get(profile.id, ()):
+        if word in needle:
+            score += 4
     return score
 
 

@@ -6,11 +6,22 @@ import base64
 import json
 import re
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mcp import Client, StdioServerParameters, stdio_client
-from mcp.types import TextContent
+from chameleon.fingerprint import extract_url
+
+__all__ = [
+    "NAVIGATOR_TOOLS",
+    "BrowserTab",
+    "PlaywrightMCP",
+    "extract_url",
+    "find_ref",
+    "normalize_tool_arguments",
+    "parse_browser_tabs",
+    "tool_result_text",
+]
 
 NAVIGATOR_TOOLS = frozenset(
     {
@@ -20,21 +31,6 @@ NAVIGATOR_TOOLS = frozenset(
         "browser_snapshot",
     }
 )
-
-_URL_PATTERNS = [
-    re.compile(r"Page URL:\s*(\S+)"),
-    re.compile(r"\(current\)[^\n]*\((https?://[^)]+)\)"),
-    re.compile(r"^-+\s*url:\s*(\S+)", re.MULTILINE | re.IGNORECASE),
-    re.compile(r"URL:\s*(https?://\S+)"),
-]
-
-
-def extract_url(snapshot: str) -> str | None:
-    for pattern in _URL_PATTERNS:
-        match = pattern.search(snapshot)
-        if match:
-            return match.group(1).rstrip(".,)")
-    return None
 
 
 def find_ref(snapshot: str, label: str) -> str | None:
@@ -65,11 +61,61 @@ def normalize_tool_arguments(tool: str, arguments: dict[str, Any]) -> dict[str, 
     return args
 
 
+@dataclass(frozen=True)
+class BrowserTab:
+    index: int
+    title: str = ""
+    url: str = ""
+    current: bool = False
+
+
+_TAB_QUOTED = re.compile(
+    r"^\s*Tab\s+(\d+)\s*:\s*\"([^\"]*)\"\s*-\s*(\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_TAB_BRACKET = re.compile(
+    r"^\s*-\s*(\d+)\s*:\s*(?:\(current\)\s*)?\[([^\]]*)\]\s*\((.+)\)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_TAB_BARE = re.compile(
+    r"^\s*(?:Tab\s+)?(\d+)\s*:\s*(https?://\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_TAB_ACTIVE = re.compile(r"active:\s*Tab\s+(\d+)", re.IGNORECASE)
+
+
+def parse_browser_tabs(text: str) -> list[BrowserTab]:
+    """Parse Playwright MCP browser_tabs list output."""
+    raw = text or ""
+    active_match = _TAB_ACTIVE.search(raw)
+    active = int(active_match.group(1)) if active_match else None
+    found: dict[int, BrowserTab] = {}
+    for pattern in (_TAB_QUOTED, _TAB_BRACKET, _TAB_BARE):
+        for match in pattern.finditer(raw):
+            index = int(match.group(1))
+            if pattern is _TAB_BARE:
+                title = ""
+                url = match.group(2).rstrip(".,)")
+            else:
+                title = (match.group(2) or "").strip()
+                url = (match.group(3) or "").rstrip(".,)")
+            current = active == index or "(current)" in match.group(0).lower()
+            previous = found.get(index)
+            if previous is None or (url and not previous.url) or (title and not previous.title):
+                found[index] = BrowserTab(index=index, title=title, url=url, current=current)
+    return [found[i] for i in sorted(found)]
+
+
+def looks_like_snapshot(text: str) -> bool:
+    blob = text or ""
+    return bool(re.search(r"Page URL:|Page Title:|\btextbox\b|\bheading\b", blob, re.I))
+
+
 def tool_result_text(result: Any) -> str:
     parts: list[str] = []
     content = getattr(result, "content", None) or []
     for item in content:
-        if isinstance(item, TextContent) or getattr(item, "type", None) == "text":
+        if getattr(item, "type", None) == "text":
             parts.append(getattr(item, "text", "") or "")
         elif isinstance(item, dict) and item.get("type") == "text":
             parts.append(str(item.get("text") or ""))
@@ -97,7 +143,7 @@ class PlaywrightMCP:
         self.headless = headless
         self.cdp_endpoint = cdp_endpoint
         self._stack = AsyncExitStack()
-        self.client: Client | None = None
+        self.client: Any = None
 
     async def __aenter__(self) -> PlaywrightMCP:
         await self.start()
@@ -107,6 +153,8 @@ class PlaywrightMCP:
         await self.close()
 
     async def start(self) -> None:
+        from mcp import Client, StdioServerParameters, stdio_client
+
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         args = [
@@ -185,3 +233,9 @@ class PlaywrightMCP:
 
     async def press_key(self, key: str) -> str:
         return await self.call_tool("browser_press_key", {"key": key})
+
+    async def list_tabs(self) -> str:
+        return await self.call_tool("browser_tabs", {"action": "list"})
+
+    async def select_tab(self, index: int) -> str:
+        return await self.call_tool("browser_tabs", {"action": "select", "index": index})
