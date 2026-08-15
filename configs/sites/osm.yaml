@@ -6,9 +6,10 @@ interaction_mode: copilot
 default_task: accompany the user exploring OpenStreetMap
 intent_hints:
   - search a city or place
-  - nearby amenities
-  - directions between places
+  - nearby amenities (only if visible)
+  - directions
   - inspect a selected feature
+  - layers / map type (only if already on this page — do not hunt)
 end_phrases:
   - done
   - quit

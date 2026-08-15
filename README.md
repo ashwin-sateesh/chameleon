@@ -4,7 +4,7 @@ Stateful three-agent browser automation (Planner, Navigator, Guardian) that paus
 
 ## Install
 
-Requires Python 3.11+, Node.js 18+ (`npx`), and an LLM key: `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` (Claude Sonnet 4.6) or `XAI_API_KEY` (Grok 4.6).
+Requires Python 3.11+, Node.js 18+ (`npx`), and an LLM key: `CLAUDE_API_KEY` / `ANTHROPIC_API_KEY` (Claude Opus 4.8) or `XAI_API_KEY` (Grok 4.6).
 
 ```bash
 python3 -m venv .venv
@@ -32,7 +32,7 @@ python -m chameleon --site greenhouse --task "apply to this job for me" --task-i
 chameleon --site maps --task-id demo-maps
 ```
 
-Copilot sites (`maps`, `osm`, `airbnb`) open the page and wait. Type what you want; the agent confirms, acts, then suggests on-page extras. Type `done` to finish.
+Copilot sites (`maps`, `osm`, `airbnb`) share the same loop. Type what you want; the agent confirms once, then does the core search. If a requested filter is not on the page, it says so and asks — it does not keep hunting. After each burst or UI click it reads the new page, suggests at most two simple extras, and asks a follow-up until you type `done`.
 
 Resume is automatic when `data/tasks/{task_id}.json` already exists.
 

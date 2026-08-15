@@ -13,7 +13,7 @@ Pitch: an agent that knows when **not** to act alone.
 - Live headed demo against execute profiles (`saucedemo`, `greenhouse`) and copilot profiles (`maps`, with `osm` fallback and `airbnb` as a second exploratory site).
 - Three agents: Planner, Navigator, Guardian. Same code for all sites; only the profile changes.
 - Execute mode: state after every action; kill/resume; pauses on ambiguity.
-- Copilot mode: observe the user's page, ask in the terminal, act only after consent.
+- Copilot mode: terminal-led — confirm once, agent acts, then suggest unused on-page options.
 - Site-specific knowledge lives in YAML profiles. Agents are profile-agnostic.
 
 ## 3. Non-goals (this build)
@@ -46,7 +46,7 @@ YAML under `configs/sites/`. Agents must not branch on site id. Adding a site is
 
 `planner_plan(task, profile) -> checklist` copies `checklist_template` from the profile for execute sites. Prints the ordered sub-goals at start of a new task. Not re-run on resume.
 
-Copilot: `planner_observe` reads URL + truncated snapshot + `intent_hints` and returns `{user_state, possible_intents, question, should_ask}`. No LLM call on idle polls — only after the page fingerprint changes and stays stable. Do not re-ask the same question on the same state.
+Copilot: `planner_observe` reads URL + truncated snapshot + `intent_hints` after each agent burst and after the user navigates in the headed browser (debounced fingerprint change). Returns unused on-page options the user would likely miss, or `should_ask false` so the loop can nudge them to click, type, or `done`. No LLM call on idle polls of the same page. Do not re-ask constraints already applied.
 
 ### FR4 — Navigator
 
@@ -131,19 +131,21 @@ Print which agent is acting and why, so handoffs are visible next to the headed 
 
 ### FR9 — Copilot
 
-Profiles with `interaction_mode: copilot` open the site and do **not** click or type. The terminal tells the user to explore, or to type a request.
+Profiles with `interaction_mode: copilot` open the site and wait for the **terminal**, not for the user to click the page.
 
-- Poll snapshots on an interval. Fingerprint = normalized URL + search box + heading. Google Maps `@lat,lng,zoom` is ignored so panning is not intent.
-- Debounce: interpret only after the fingerprint is stable. No LLM on unchanged polls.
-- Cookie/CAPTCHA: ASK the user to handle it in the browser. Do not click consent dialogs. No stealth.
-- Guardian copilot: `ASK` (options or consent-to-act), `WAIT` (user will drive), `PROCEED` (act now), `DONE`. Choosing "food" is not consent — ask "Should I do that, or will you?"
-- Navigator runs only a consented micro-goal, then returns to observe. No map-canvas clicks.
+- On open: one crisp line asking what they want. If `--task` is a real request (not `default_task`), immediately ASK `I'll {task}. OK?`
+- A concrete instruction or “yes” is consent — one confirm, then the agent acts. Do not double-ask “or will you?”
+- Core search (query, dates, guests, submit) is one burst. Optional filters (stars, chips, Guest favorite, layers) are applied only if already visible — one try. If a requested filter is not on the page, tell the user and ASK; do not hunt.
+- After each burst and after the user clicks in the headed browser: Planner analyzes THIS page, suggests at most 2 simple visible extras, and asks a follow-up. If a click opens a new tab, switch to that tab and analyze it. If nothing useful: nudge to click, type, or `done`.
+- Same copilot loop for `maps`, `osm`, and `airbnb` (profile data only; no site-id branches).
+- Idle polls of the same page do not call the LLM. Cookie/CAPTCHA: ASK the user to handle it in the browser. No stealth.
+- Per-click Guardian is a heuristic (ASK only for leave-site / book / pay / share / submit). Navigator bursts run back-to-back.
 - User types `done` / `quit` / `that's all` to finish. Kill/resume still works mid-question.
 
 ## 5. Non-functional requirements
 
 - **NFR1** Browser is headed. Never pass `--headless`. No stealth plugins.
-- **NFR2** Navigator and Guardian call a real LLM at each decision — Claude Sonnet 4.6 (`CLAUDE_API_KEY` / `ANTHROPIC_API_KEY`) or Grok 4.6 (`XAI_API_KEY`). No hardcoded click sequences standing in for those decisions.
+- **NFR2** Navigator, Guardian, and copilot Planner call a real LLM — Claude Opus 4.8 (`CLAUDE_API_KEY` / `ANTHROPIC_API_KEY`) or Grok 4.6 (`XAI_API_KEY`). No hardcoded click sequences standing in for those decisions. Copilot per-click safety is a small heuristic after the user already consented to the burst.
 - **NFR3** Navigator is the only agent that proposes browser tools. `planner.py` and `guardian.py` must not import `mcp_client` or `mcp`. Storage dump/restore is orchestrator-owned (`browser_storage_state` / `browser_set_storage_state`); the LLM never receives those tools.
 - **NFR4** `.env` is gitignored. Sauce Demo credentials may live in the public demo YAML (`standard_user` / `secret_sauce`).
 
@@ -171,7 +173,7 @@ Risk tags: `none` | `ambiguous_choice` | `needs_user_info` | `irreversible`.
 
 - Base URL: `https://www.google.com/maps`
 - `interaction_mode`: copilot
-- Intent hints: tourist places, food, lodging, directions
+- Intent hints: restaurants / hotels / things to do filters, directions, similar places
 - Do not click the map canvas
 
 ### osm
@@ -184,7 +186,7 @@ Risk tags: `none` | `ambiguous_choice` | `needs_user_info` | `irreversible`.
 
 - Base URL: `https://www.airbnb.com`
 - `interaction_mode`: copilot
-- Second exploratory shape: search → dates/guests → listing → ASK before book/contact
+- Second exploratory shape: search → dates/guests → unused filters (Guest favorite, Luxury, Instant Book) → listing → ASK before book/contact
 
 ## 7. Demo acceptance
 
@@ -193,7 +195,7 @@ Must pass twice:
 1. `chameleon --site saucedemo --task "buy me a t-shirt" --task-id demo1` — Guardian asks which shirt; user answers; checkout asks for missing info (e.g. zip); finish.
 2. Kill (Ctrl+C) on a second run right after a Guardian question; restart the same `--task-id`; resumes without re-login or re-asking answered questions.
 3. `chameleon --site greenhouse --task "apply to this job for me" --task-id demo-gh` — same three agents, different YAML, no code branch on site id.
-4. `chameleon --site maps --task-id demo-maps` — agent idle; user searches a city in Maps; Guardian asks next-step options; consent before the agent types; `done` ends. Kill/resume mid-ask still works.
+4. `chameleon --site maps --task "restaurants in San Francisco" --task-id demo-maps` — agent confirms the task, acts, then suggests on-page extras; `done` ends. Kill/resume mid-ask still works.
 
 ## 8. Later (out of this build)
 

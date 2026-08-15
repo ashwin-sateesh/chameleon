@@ -12,6 +12,7 @@ _AT_RE = re.compile(r"/@[-\d.]+,[-\d.]+(?:,[-\d.]+[a-z]*)?", re.I)
 _DATA_RE = re.compile(r"/data=[^/]*", re.I)
 _TITLE_RE = re.compile(r"Page Title:\s*(.+)", re.I)
 _HEADING_RE = re.compile(r'heading\s+"([^"]+)"', re.I)
+_DIALOG_RE = re.compile(r'dialog\s+"([^"]+)"', re.I)
 
 _URL_PATTERNS = [
     re.compile(r"Page URL:\s*(\S+)"),
@@ -77,6 +78,12 @@ def extract_heading(snapshot: str) -> str:
     return (match.group(1).strip() if match else "")[:200]
 
 
+def extract_headings(snapshot: str, limit: int = 3) -> str:
+    names = [m.strip()[:80] for m in _HEADING_RE.findall(snapshot or "") if m.strip()]
+    dialogs = [m.strip()[:80] for m in _DIALOG_RE.findall(snapshot or "") if m.strip()]
+    return " / ".join((dialogs + names)[:limit]).lower()
+
+
 def extract_search_value(snapshot: str) -> str:
     for line in (snapshot or "").splitlines():
         lowered = line.lower()
@@ -99,7 +106,7 @@ def page_fingerprint(snapshot: str, url: str | None = None) -> str:
             normalize_url(resolved),
             extract_title(snapshot).lower(),
             extract_search_value(snapshot).lower(),
-            extract_heading(snapshot).lower(),
+            extract_headings(snapshot),
         ]
     )
 

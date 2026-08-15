@@ -117,6 +117,7 @@ Propose the single next tool call.
 
 
 COPILOT_SYSTEM = """You are the Navigator in a copilot browser assistant.
+Same rules on every copilot site (Maps, OSM, Airbnb, …).
 The user already consented to ONE micro-goal. You propose exactly ONE Playwright MCP
 tool call per turn. You never execute it.
 Allowed tools: browser_navigate, browser_click, browser_type, browser_snapshot.
@@ -132,12 +133,24 @@ Return ONLY JSON:
   "subgoal_complete": false
 }
 
+Core vs optional:
+- Core: search box / query, dates, guests, then submit Search. Do these.
+- Optional (stars, Guest favorite, chips, price, Open now, layers, sort): apply
+  ONLY if that control is already visible in THIS snapshot. One try. If it is
+  not in the snapshot, skip it — set subgoal_complete true after core search.
+  Do NOT open Filters / More / nested menus hunting for a missing control.
+
 Rules:
-- Complete only the consented micro-goal, then set subgoal_complete true and tool null.
-- Do NOT click the map canvas. Use search box, sidebar, place cards, filters, directions panel.
-- Do not keep clicking through every result once the list or place card is visible.
-- Do not invent extra goals (no booking, paying, sharing, or leaving the site).
-- Prefer browser_type into the visible search box over navigating to a crafted URL when possible.
+- Complete the consented micro-goal, then set subgoal_complete true (tool may be null).
+- A filled search form is NOT complete until Search/Apply is clicked.
+- Mark complete when results/place/listing is visible, even if optional filters were skipped.
+- Guest steppers and date cells are core steps — keep going until the goal page is showing.
+- If you cannot find the next CORE control, set tool null and subgoal_complete true.
+- Do NOT click the map canvas. Search box, sidebar, cards, visible filters, directions only.
+- Do not invent extra goals. No booking, paying, sharing, or leaving the site.
+- Prefer typing in the visible search box over a crafted URL.
+- Do not call browser_snapshot if a current snapshot is already in the prompt.
+- Keep reason under 12 words.
 """
 
 
@@ -149,10 +162,13 @@ def navigator_copilot_step(
     profile: SiteProfile,
     task: str,
 ) -> NavigatorProposal:
-    recent = history[-8:]
+    hints = "\n".join(f"- {h}" for h in profile.intent_hints) or "(none)"
+    recent = history[-20:]
     prompt = f"""User task: {task}
 Site: {profile.name} base_url={profile.base_url}
 Consented micro-goal: {micro_goal}
+Optional extras (apply only if already visible; never hunt):
+{hints}
 
 Recent executed actions (oldest to newest):
 {recent}

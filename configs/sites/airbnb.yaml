@@ -5,10 +5,14 @@ task_type: exploration
 interaction_mode: copilot
 default_task: accompany the user exploring stays on Airbnb
 intent_hints:
-  - search a city or neighborhood
-  - dates and guest count
-  - filters such as price, type, and amenities
-  - open a listing
+  - Guest favorite
+  - Luxury
+  - Superhost
+  - Instant Book
+  - price filter
+  - type of place
+  - map vs list view
+  - star rating (only if the control is already visible — do not hunt)
   - contact host or request to book (ask first — irreversible)
 end_phrases:
   - done

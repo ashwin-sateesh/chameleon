@@ -1,4 +1,4 @@
-"""Copilot orchestrator: observe the headed page, ask in the terminal, act only after consent."""
+"""Terminal-led copilot: confirm, act, then suggest unused on-page options."""
 
 from __future__ import annotations
 
@@ -17,7 +17,13 @@ from chameleon.fingerprint import (
     page_fingerprint,
 )
 from chameleon.loop import StopRequested, _persist_browser, _restore_browser
-from chameleon.mcp_client import PlaywrightMCP, extract_url, normalize_tool_arguments
+from chameleon.mcp_client import (
+    PlaywrightMCP,
+    extract_url,
+    looks_like_snapshot,
+    normalize_tool_arguments,
+    parse_browser_tabs,
+)
 from chameleon.narration import answer as narrate_answer
 from chameleon.narration import ask as narrate_ask
 from chameleon.narration import say
@@ -35,12 +41,33 @@ from chameleon.state import (
     save_state,
 )
 
-MAX_ACT_ACTIONS = 12
+MAX_ACT_ACTIONS = 24
 MAX_OBSERVED_EVENTS = 20
+PROCEED_NUDGE = (
+    "Click something on the page, type what you want next, or type done."
+)
+
+
+def followup_question(*, unmet: list[str], extras: list[str]) -> str | None:
+    missing = [item for item in unmet if item][:2]
+    shown = [item for item in extras if item][:2]
+    if missing:
+        label = " and ".join(missing)
+        if shown:
+            return (
+                f"{label} isn't on this page. I can do {' or '.join(shown)} instead. "
+                "Skip it / which / done?"
+            )
+        return f"{label} isn't on this page. Skip it, tell me another way, or type done."
+    if len(shown) == 1:
+        return f"I can {shown[0]}. OK / done?"
+    if len(shown) >= 2:
+        return f"I can {shown[0]} or {shown[1]}. Which / done?"
+    return None
 
 
 def _poll_seconds() -> float:
-    return float(os.getenv("CHAMELEON_COPILOT_POLL", "3"))
+    return float(os.getenv("CHAMELEON_COPILOT_POLL", "1"))
 
 
 def _debounce_polls() -> int:
@@ -52,6 +79,16 @@ async def read_user_line() -> str:
         return await asyncio.to_thread(input, "> ")
     except EOFError:
         return "done"
+
+
+def task_is_specific(profile: SiteProfile, task: str) -> bool:
+    text = (task or "").strip().lower()
+    if not text:
+        return False
+    default = (profile.default_task or "").strip().lower()
+    if text == default:
+        return False
+    return not text.startswith("accompany the user")
 
 
 def _complete(state: TaskState) -> None:
@@ -102,7 +139,7 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             say("system", "Task already completed.")
             return state
         if state.status == TaskStatus.failed:
-            say("system", "Previous run failed; continuing in observe mode.")
+            say("system", "Previous run failed; continuing.")
             state.status = TaskStatus.running
             state.phase = CopilotPhase.observing
             save_state(state)
@@ -121,15 +158,17 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
         )
         save_state(state)
         say("planner", f"Copilot on {profile.name}: {task}")
-        say("planner", "I will not click or type until you ask me to.")
 
     stop = False
     stop_event = asyncio.Event()
-    pending_change: str | None = None
-    stable_count = 0
     actions_this_goal = 0
     latest_snapshot = ""
     mcp: PlaywrightMCP | None = None
+    pending_change: str | None = None
+    stable_count = 0
+    nudged_fingerprint: str | None = None
+    last_intents: list[str] = []
+    last_tab_count = 0
 
     def _request_stop() -> None:
         nonlocal stop
@@ -145,16 +184,13 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             signal.signal(sig, lambda *_: _request_stop())
 
     def _finish_acting(snapshot: str) -> None:
-        nonlocal actions_this_goal, pending_change, stable_count
+        nonlocal actions_this_goal
         state.phase = CopilotPhase.observing
         state.consented_goal = None
         if state.status != TaskStatus.paused_ask:
             state.status = TaskStatus.running
         _mark_page_known(state, snapshot)
         actions_this_goal = 0
-        pending_change = None
-        stable_count = 0
-        say("system", "Back to watching. Search, click, or tell me what to do.")
 
     async def _act_one_step(snapshot: str) -> str:
         nonlocal actions_this_goal
@@ -181,17 +217,15 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                 "arguments": proposal.arguments,
                 "reason": proposal.reason,
             }
-            verdict = await asyncio.to_thread(
-                guardian_copilot_action,
+            verdict = guardian_copilot_action(
                 proposed_action=action,
                 micro_goal=goal,
                 task=state.task,
             )
             if verdict.decision == "ASK":
-                _enter_ask(state, verdict.question or "Should I continue this action?")
+                _enter_ask(state, verdict.question or "Continue this action?")
                 return snapshot
             if verdict.decision != "PROCEED":
-                say("guardian", "Skipping this action; you drive.")
                 _finish_acting(snapshot)
                 return snapshot
             if mcp is None:
@@ -218,27 +252,51 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             _finish_acting(snapshot)
         return snapshot
 
-    async def _interpret(snapshot: str) -> None:
-        nonlocal pending_change, stable_count
-        if state.phase == CopilotPhase.asking and state.pending_question:
+    async def _run_burst(snapshot: str) -> str:
+        while (
+            state.phase == CopilotPhase.acting
+            and state.status == TaskStatus.running
+            and not stop
+            and actions_this_goal < MAX_ACT_ACTIONS
+        ):
+            snapshot = await _act_one_step(snapshot)
+            if state.phase != CopilotPhase.acting:
+                break
+        if state.phase == CopilotPhase.acting:
+            if actions_this_goal >= MAX_ACT_ACTIONS:
+                say("system", "Stopping this burst — action limit reached.")
+            _finish_acting(snapshot)
+        if state.phase == CopilotPhase.observing and not state.pending_question:
+            await _suggest_hidden(snapshot)
+        return snapshot
+
+    async def _suggest_hidden(snapshot: str, *, replace_question: bool = False) -> None:
+        nonlocal pending_change, stable_count, nudged_fingerprint, last_intents
+        if state.phase == CopilotPhase.acting:
             return
+        if state.pending_question and not replace_question:
+            return
+        if replace_question:
+            state.pending_question = None
+            if state.status == TaskStatus.paused_ask:
+                state.status = TaskStatus.running
+            state.phase = CopilotPhase.observing
         observation = await asyncio.to_thread(
             planner_observe,
             snapshot=snapshot,
             url=state.current_url,
             last_user_state=state.user_state,
-            pending_question=state.pending_question,
+            pending_question=None if replace_question else state.pending_question,
             guardian_answers=state.guardian_answers,
             observed_events=state.observed_events,
             profile=profile,
             task=state.task,
+            replace_question=replace_question,
         )
         if observation.user_state:
             state.user_state = observation.user_state
             _append_event(state, observation.user_state)
-        fp = page_fingerprint(snapshot, state.current_url)
-        state.last_fingerprint = fp
-        state.interpreted_fingerprint = fp
+        _mark_page_known(state, snapshot)
         pending_change = None
         stable_count = 0
         if observation.blocker:
@@ -246,15 +304,54 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             if not _already_asked(state, question):
                 _enter_ask(state, question)
                 return
-        if observation.should_ask and observation.question:
-            if not _already_asked(state, observation.question):
-                _enter_ask(
-                    state,
-                    observation.question,
-                    proposed_goal=observation.suggested_micro_goal,
-                )
-                return
+        unmet = list(observation.unmet_constraints)
+        extras = list(observation.possible_intents)
+        last_intents = extras
+        if unmet:
+            question = followup_question(unmet=unmet, extras=extras)
+        elif observation.should_ask and observation.question:
+            question = observation.question
+        else:
+            question = followup_question(unmet=[], extras=extras)
+        if question and not _already_asked(state, question):
+            goal = observation.suggested_micro_goal
+            if not goal and extras:
+                goal = extras[0]
+            _enter_ask(state, question, proposed_goal=goal)
+            return
+        fp = state.interpreted_fingerprint
+        if fp and fp != nudged_fingerprint:
+            nudged_fingerprint = fp
+            say("system", PROCEED_NUDGE)
         save_state(state)
+
+    async def _focus_new_tab() -> tuple[bool, str]:
+        nonlocal last_tab_count
+        if mcp is None:
+            return False, ""
+        try:
+            listing = await mcp.list_tabs()
+        except Exception:  # noqa: BLE001
+            return False, await mcp.snapshot()
+        tabs = parse_browser_tabs(listing)
+        count = len(tabs)
+        if last_tab_count == 0:
+            last_tab_count = max(count, 1)
+            return False, await mcp.snapshot()
+        if count > last_tab_count:
+            last_tab_count = count
+            newest = max(tabs, key=lambda tab: tab.index)
+            say("system", "New tab opened — switching to it.")
+            try:
+                selected = await mcp.select_tab(newest.index)
+            except Exception as exc:  # noqa: BLE001
+                say("system", f"Could not switch tab: {exc}")
+                return False, await mcp.snapshot()
+            snapshot = selected if looks_like_snapshot(selected) else await mcp.snapshot()
+            await _persist_browser(mcp, state, snapshot)
+            return True, snapshot
+        last_tab_count = count
+        return False, await mcp.snapshot()
 
     async def _on_snapshot(snapshot: str) -> str:
         nonlocal pending_change, stable_count
@@ -264,9 +361,6 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
         fp = page_fingerprint(snapshot, state.current_url)
         state.last_fingerprint = fp
 
-        if state.phase == CopilotPhase.acting:
-            return await _act_one_step(snapshot)
-
         blocker = detect_blocker(snapshot)
         if blocker:
             question = blocker_question(blocker)
@@ -274,7 +368,7 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                 _enter_ask(state, question)
                 return snapshot
 
-        if state.phase == CopilotPhase.asking:
+        if state.phase == CopilotPhase.acting:
             save_state(state)
             return snapshot
 
@@ -286,14 +380,17 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
         if fp != pending_change:
             pending_change = fp
             stable_count = 1
-            save_state(state)
-            say("system", "Page changed — waiting until it settles.")
         else:
             stable_count += 1
         if stable_count < _debounce_polls():
+            save_state(state)
             return snapshot
 
-        await _interpret(snapshot)
+        say("planner", "Page changed — reading it.")
+        await _suggest_hidden(
+            snapshot,
+            replace_question=bool(state.pending_question),
+        )
         return snapshot
 
     async def _on_user_text(text: str) -> None:
@@ -318,9 +415,8 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             state.pending_question = None
             state.phase = CopilotPhase.observing
             state.status = TaskStatus.running
-            state.interpreted_fingerprint = None
             save_state(state)
-            say("system", "Thanks. I'll keep watching.")
+            say("system", "Thanks.")
             return
 
         verdict = await asyncio.to_thread(
@@ -328,8 +424,8 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             pending_question=state.pending_question,
             user_reply=text,
             user_state=state.user_state,
-            possible_intents=[],
-            suggested_micro_goal=state.consented_goal,
+            possible_intents=last_intents,
+            suggested_micro_goal=state.consented_goal or state.task,
             guardian_answers=state.guardian_answers,
             task=state.task,
             site_name=profile.name,
@@ -352,29 +448,29 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
             state.phase = CopilotPhase.observing
             state.consented_goal = None
             save_state(state)
-            say("guardian", "You drive — I'll watch.")
+            say("system", PROCEED_NUDGE)
             return
         if verdict.decision == "ASK":
             _enter_ask(
                 state,
-                verdict.question or "Should I do that, or will you?",
+                verdict.question or "Which option?",
                 proposed_goal=verdict.micro_goal or state.consented_goal,
             )
             return
 
-        goal = verdict.micro_goal or state.consented_goal
+        goal = verdict.micro_goal or state.consented_goal or state.task
         if not goal:
             state.phase = CopilotPhase.observing
             save_state(state)
-            say("guardian", "I need a clearer goal before acting. You can keep exploring.")
+            say("system", "Tell me what to do.")
             return
         state.phase = CopilotPhase.acting
         state.consented_goal = goal
         state.status = TaskStatus.running
         save_state(state)
-        say("navigator", f"Acting on: {goal}")
+        say("navigator", f"Doing: {goal}")
         if latest_snapshot:
-            latest_snapshot = await _act_one_step(latest_snapshot)
+            latest_snapshot = await _run_burst(latest_snapshot)
 
     sess = session_dir(task_id)
     input_task: asyncio.Task[str] | None = None
@@ -395,17 +491,20 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                     save_state(state)
                     say(
                         "system",
-                        f"{profile.name} is open. Search a place in the browser, click around, "
-                        "or type here what you want. Type done when you are finished.",
+                        f"{profile.name} is open. Tell me what you want here and I will do it. "
+                        "Type done to finish.",
                     )
+                    if task_is_specific(profile, state.task):
+                        _enter_ask(
+                            state,
+                            f"I'll {state.task.rstrip('.')}. OK?",
+                            proposed_goal=state.task,
+                        )
             else:
                 if state.interpreted_fingerprint is None and state.phase != CopilotPhase.asking:
                     state.interpreted_fingerprint = fp
                     save_state(state)
-                say(
-                    "system",
-                    "Resumed. Keep using the browser, or type here. Type done when you are finished.",
-                )
+                say("system", f"Resumed. Tell me what to do, or type done.")
                 if state.pending_question:
                     narrate_ask(state.pending_question)
 
@@ -442,7 +541,15 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                     if text:
                         await _on_user_text(text)
                     continue
-                snapshot = await mcp.snapshot()
+                switched, snapshot = await _focus_new_tab()
+                if switched:
+                    say("planner", "New tab — reading it.")
+                    await _suggest_hidden(
+                        snapshot,
+                        replace_question=True,
+                    )
+                    latest_snapshot = snapshot
+                    continue
                 latest_snapshot = await _on_snapshot(snapshot)
     except StopRequested:
         if state.status == TaskStatus.running:

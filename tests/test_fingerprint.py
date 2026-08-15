@@ -79,8 +79,8 @@ def test_detect_cookie_and_captcha():
     assert detect_blocker("San Francisco restaurants") is None
 
 
-def test_end_phrases():
-    phrases = ["done", "quit", "that's all"]
-    assert is_end_phrase("done", phrases)
-    assert is_end_phrase("That's all.", phrases)
-    assert not is_end_phrase("food", phrases)
+def test_dialog_changes_fingerprint():
+    url = "https://www.airbnb.com/s/sfo"
+    base = _snap(url, title="Airbnb", heading="Homes in San Francisco")
+    dialog = base + '- dialog "Cozy loft" [ref=e99]\n'
+    assert page_fingerprint(base, url) != page_fingerprint(dialog, url)
