@@ -4,34 +4,34 @@ overview: Lock a packaging-ready src/ layout now, write requirements.md as the c
 todos:
   - id: docs-requirements
     content: Write docs/requirements.md (contract) and expand README with install/run only
-    status: pending
+    status: completed
   - id: scaffold
     content: Create src/chameleon tree, pyproject.toml, .env.example, YAML site profiles, gitignore data/
-    status: pending
+    status: completed
   - id: smoke-mcp
     content: "scripts/smoke_mcp.py: headed Playwright MCP login against Sauce Demo"
-    status: pending
+    status: completed
   - id: state-profiles
     content: Pydantic state + profile loaders with tests and atomic JSON writes
-    status: pending
+    status: completed
   - id: planner
     content: Hardcoded checklist Planner from profile template
-    status: pending
+    status: completed
   - id: navigator-loop
     content: llm.py + Navigator proposal + loop execute + persist storage_state every action
-    status: pending
+    status: completed
   - id: guardian
     content: Guardian ASK/PROCEED, CLI input, persist answers
-    status: pending
+    status: completed
   - id: resume
     content: Resume from task_id + SIGINT persist; skip Planner/login
-    status: pending
+    status: completed
   - id: rehearse
     content: Sauce Demo e2e twice including kill/resume; Greenhouse same agents
-    status: pending
+    status: completed
   - id: isolation-test
     content: Test that planner/guardian cannot import MCP
-    status: pending
+    status: completed
 isProject: false
 ---
 

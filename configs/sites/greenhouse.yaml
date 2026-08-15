@@ -1,0 +1,15 @@
+name: Greenhouse Job Application
+base_url: https://job-boards.greenhouse.io/gitlab/jobs/8503792002
+requires_login: false
+task_type: form_fill
+checklist_template:
+  - goal: open the application form
+    risk: none
+  - goal: fill personal info fields (name, email, phone)
+    risk: needs_user_info
+  - goal: answer screening questions
+    risk: ambiguous_choice
+  - goal: attach resume/cover letter fields if required
+    risk: needs_user_info
+  - goal: submit the application
+    risk: irreversible

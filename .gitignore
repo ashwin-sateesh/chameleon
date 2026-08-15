@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Chameleon runtime (task JSON + Playwright profiles)
+data/
