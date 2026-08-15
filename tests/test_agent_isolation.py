@@ -33,6 +33,15 @@ def test_parse_json_object_fenced():
     assert data["arguments"]["target"] == "e1"
 
 
+def test_parse_json_object_extra_trailing_object():
+    data = parse_json_object(
+        '{"tool": "browser_snapshot", "arguments": {}, "reason": "see dropdown", "subgoal_complete": false}\n'
+        '{"tool": "browser_click", "arguments": {"target": "e1"}}\n'
+    )
+    assert data["tool"] == "browser_snapshot"
+    assert data["subgoal_complete"] is False
+
+
 def test_normalize_ref_to_target():
     args = normalize_tool_arguments("browser_click", {"ref": "e12", "element": "Login"})
     assert args["target"] == "e12"
