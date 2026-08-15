@@ -36,6 +36,34 @@ def test_save_load_round_trip(tmp_path, monkeypatch):
     assert loaded.storage_state_path == str(storage_state_path("demo1"))
 
 
+def test_copilot_state_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHAMELEON_ROOT", str(tmp_path))
+    (tmp_path / "configs" / "sites").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='t'\n")
+
+    from chameleon.state import CopilotPhase, ObservedEvent
+
+    state = new_state(
+        site="maps",
+        task="explore",
+        task_id="maps1",
+        checklist=[],
+        current_url="https://www.google.com/maps",
+        phase=CopilotPhase.observing,
+    )
+    state.user_state = "Maps homepage"
+    state.last_fingerprint = "fp1"
+    state.interpreted_fingerprint = "fp1"
+    state.observed_events = [ObservedEvent(url=state.current_url, summary="home")]
+    save_state(state)
+    loaded = load_state("maps1")
+    assert loaded is not None
+    assert loaded.phase == CopilotPhase.observing
+    assert loaded.user_state == "Maps homepage"
+    assert loaded.interpreted_fingerprint == "fp1"
+    assert loaded.observed_events[0].summary == "home"
+
+
 def test_atomic_replace(tmp_path, monkeypatch):
     monkeypatch.setenv("CHAMELEON_ROOT", str(tmp_path))
     (tmp_path / "configs" / "sites").mkdir(parents=True)

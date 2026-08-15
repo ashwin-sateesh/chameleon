@@ -38,3 +38,25 @@ def test_list_profiles_includes_both():
     ids = list_profile_ids()
     assert "saucedemo" in ids
     assert "greenhouse" in ids
+    assert "maps" in ids
+    assert "osm" in ids
+    assert "airbnb" in ids
+
+
+def test_execute_profiles_default_interaction_mode():
+    assert load_profile("saucedemo").interaction_mode == "execute"
+    assert load_profile("greenhouse").interaction_mode == "execute"
+
+
+def test_load_copilot_profiles():
+    maps = load_profile("maps")
+    assert maps.interaction_mode == "copilot"
+    assert maps.intent_hints
+    assert maps.default_task
+    assert "done" in maps.end_phrases
+    osm = load_profile("osm")
+    assert osm.interaction_mode == "copilot"
+    assert osm.base_url.startswith("http")
+    airbnb = load_profile("airbnb")
+    assert airbnb.interaction_mode == "copilot"
+    assert "book" in " ".join(airbnb.intent_hints).lower() or "listing" in " ".join(airbnb.intent_hints).lower()

@@ -1,0 +1,18 @@
+name: Airbnb
+base_url: https://www.airbnb.com
+requires_login: false
+task_type: exploration
+interaction_mode: copilot
+default_task: accompany the user exploring stays on Airbnb
+intent_hints:
+  - search a city or neighborhood
+  - dates and guest count
+  - filters such as price, type, and amenities
+  - open a listing
+  - contact host or request to book (ask first — irreversible)
+end_phrases:
+  - done
+  - quit
+  - stop
+  - that's all
+  - thats all

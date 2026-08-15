@@ -1,0 +1,17 @@
+name: Google Maps
+base_url: https://www.google.com/maps
+requires_login: false
+task_type: exploration
+interaction_mode: copilot
+default_task: accompany the user exploring Google Maps
+intent_hints:
+  - famous tourist places and landmarks
+  - food and restaurants
+  - places to stay
+  - directions between places
+end_phrases:
+  - done
+  - quit
+  - stop
+  - that's all
+  - thats all

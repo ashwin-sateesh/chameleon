@@ -29,7 +29,12 @@ Run a task in the terminal (headed OS browser):
 ```bash
 chameleon --site saucedemo --task "buy me a t-shirt" --task-id demo1
 python -m chameleon --site greenhouse --task "apply to this job for me" --task-id demo-gh
+chameleon --site maps --task-id demo-maps
 ```
+
+Copilot sites (`maps`, `osm`, `airbnb`) open the page and wait. Type what you want; the agent confirms, acts, then suggests on-page extras. Type `done` to finish.
+
+Resume is automatic when `data/tasks/{task_id}.json` already exists.
 
 Open the two-pane web console (live page on the left, chat on the right):
 

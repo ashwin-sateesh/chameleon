@@ -114,3 +114,69 @@ Propose the single next tool call.
         f"{proposal.reason or 'next action'} | tool={proposal.tool} complete={proposal.subgoal_complete}",
     )
     return proposal
+
+
+COPILOT_SYSTEM = """You are the Navigator in a copilot browser assistant.
+The user already consented to ONE micro-goal. You propose exactly ONE Playwright MCP
+tool call per turn. You never execute it.
+Allowed tools: browser_navigate, browser_click, browser_type, browser_snapshot.
+
+Playwright MCP click/type use `target` (the snapshot ref such as e12), not CSS selectors.
+You may also send `element` as a short human description.
+
+Return ONLY JSON:
+{
+  "tool": "browser_click" | "browser_type" | "browser_navigate" | "browser_snapshot" | null,
+  "arguments": { ... },
+  "reason": "short why",
+  "subgoal_complete": false
+}
+
+Rules:
+- Complete only the consented micro-goal, then set subgoal_complete true and tool null.
+- Do NOT click the map canvas. Use search box, sidebar, place cards, filters, directions panel.
+- Do not keep clicking through every result once the list or place card is visible.
+- Do not invent extra goals (no booking, paying, sharing, or leaving the site).
+- Prefer browser_type into the visible search box over navigating to a crafted URL when possible.
+"""
+
+
+def navigator_copilot_step(
+    *,
+    micro_goal: str,
+    snapshot: str,
+    history: list[dict[str, Any]],
+    profile: SiteProfile,
+    task: str,
+) -> NavigatorProposal:
+    recent = history[-8:]
+    prompt = f"""User task: {task}
+Site: {profile.name} base_url={profile.base_url}
+Consented micro-goal: {micro_goal}
+
+Recent executed actions (oldest to newest):
+{recent}
+
+Current accessibility snapshot:
+{snapshot[:18000]}
+
+Propose the single next tool call, or mark the micro-goal complete.
+"""
+    raw = complete(prompt, system=COPILOT_SYSTEM)
+    data = parse_json_object(raw)
+    tool = data.get("tool")
+    if tool == "null":
+        tool = None
+    if tool is not None and tool not in NAVIGATOR_TOOLS:
+        raise ValueError(f"Navigator proposed disallowed tool: {tool!r}")
+    proposal = NavigatorProposal(
+        tool=tool,
+        arguments=data.get("arguments") or {},
+        reason=str(data.get("reason") or ""),
+        subgoal_complete=bool(data.get("subgoal_complete")),
+    )
+    say(
+        "navigator",
+        f"{proposal.reason or 'micro-goal'} | tool={proposal.tool} complete={proposal.subgoal_complete}",
+    )
+    return proposal

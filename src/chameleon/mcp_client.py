@@ -9,8 +9,16 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
 
-from mcp import Client, StdioServerParameters, stdio_client
-from mcp.types import TextContent
+from chameleon.fingerprint import extract_url
+
+__all__ = [
+    "NAVIGATOR_TOOLS",
+    "PlaywrightMCP",
+    "extract_url",
+    "find_ref",
+    "normalize_tool_arguments",
+    "tool_result_text",
+]
 
 NAVIGATOR_TOOLS = frozenset(
     {
@@ -20,21 +28,6 @@ NAVIGATOR_TOOLS = frozenset(
         "browser_snapshot",
     }
 )
-
-_URL_PATTERNS = [
-    re.compile(r"Page URL:\s*(\S+)"),
-    re.compile(r"\(current\)[^\n]*\((https?://[^)]+)\)"),
-    re.compile(r"^-+\s*url:\s*(\S+)", re.MULTILINE | re.IGNORECASE),
-    re.compile(r"URL:\s*(https?://\S+)"),
-]
-
-
-def extract_url(snapshot: str) -> str | None:
-    for pattern in _URL_PATTERNS:
-        match = pattern.search(snapshot)
-        if match:
-            return match.group(1).rstrip(".,)")
-    return None
 
 
 def find_ref(snapshot: str, label: str) -> str | None:
@@ -69,7 +62,7 @@ def tool_result_text(result: Any) -> str:
     parts: list[str] = []
     content = getattr(result, "content", None) or []
     for item in content:
-        if isinstance(item, TextContent) or getattr(item, "type", None) == "text":
+        if getattr(item, "type", None) == "text":
             parts.append(getattr(item, "text", "") or "")
         elif isinstance(item, dict) and item.get("type") == "text":
             parts.append(str(item.get("text") or ""))
@@ -97,7 +90,7 @@ class PlaywrightMCP:
         self.headless = headless
         self.cdp_endpoint = cdp_endpoint
         self._stack = AsyncExitStack()
-        self.client: Client | None = None
+        self.client: Any = None
 
     async def __aenter__(self) -> PlaywrightMCP:
         await self.start()
@@ -107,6 +100,8 @@ class PlaywrightMCP:
         await self.close()
 
     async def start(self) -> None:
+        from mcp import Client, StdioServerParameters, stdio_client
+
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         args = [
