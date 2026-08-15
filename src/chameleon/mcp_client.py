@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from contextlib import AsyncExitStack
@@ -83,9 +84,18 @@ def tool_result_text(result: Any) -> str:
 
 
 class PlaywrightMCP:
-    def __init__(self, *, user_data_dir: Path, output_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        user_data_dir: Path,
+        output_dir: Path,
+        headless: bool = False,
+        cdp_endpoint: str | None = None,
+    ) -> None:
         self.user_data_dir = user_data_dir
         self.output_dir = output_dir
+        self.headless = headless
+        self.cdp_endpoint = cdp_endpoint
         self._stack = AsyncExitStack()
         self.client: Client | None = None
 
@@ -99,20 +109,25 @@ class PlaywrightMCP:
     async def start(self) -> None:
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        args = [
+            "-y",
+            "@playwright/mcp@latest",
+            "--output-dir",
+            str(self.output_dir),
+            "--caps",
+            "storage,vision",
+            "--viewport-size",
+            "1280x720",
+        ]
+        if self.cdp_endpoint:
+            args.extend(["--cdp-endpoint", self.cdp_endpoint])
+        else:
+            args.extend(["--user-data-dir", str(self.user_data_dir)])
+            if self.headless:
+                args.append("--headless")
         params = StdioServerParameters(
             command="npx",
-            args=[
-                "-y",
-                "@playwright/mcp@latest",
-                "--user-data-dir",
-                str(self.user_data_dir),
-                "--output-dir",
-                str(self.output_dir),
-                "--caps",
-                "storage",
-                "--viewport-size",
-                "1280x720",
-            ],
+            args=args,
         )
         self.client = await self._stack.enter_async_context(Client(stdio_client(params)))
 
@@ -139,3 +154,34 @@ class PlaywrightMCP:
 
     async def restore_storage_state(self, path: Path) -> str:
         return await self.call_tool("browser_set_storage_state", {"filename": str(path)})
+
+    async def screenshot_data_url(self) -> str | None:
+        """JPEG data URL for the UI pane. Best-effort; never raises to the loop."""
+        if self.client is None:
+            return None
+        frame_path = self.output_dir / "ui-frame.jpg"
+        try:
+            result = await self.client.call_tool(
+                "browser_take_screenshot",
+                {"type": "jpeg", "filename": str(frame_path)},
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        content = getattr(result, "content", None) or []
+        for item in content:
+            kind = getattr(item, "type", None)
+            data = getattr(item, "data", None)
+            mime = getattr(item, "mimeType", None) or "image/jpeg"
+            if kind == "image" and data:
+                return f"data:{mime};base64,{data}"
+        if frame_path.is_file():
+            raw = frame_path.read_bytes()
+            if raw:
+                return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+        return None
+
+    async def click_xy(self, x: int, y: int) -> str:
+        return await self.call_tool("browser_mouse_click_xy", {"x": int(x), "y": int(y)})
+
+    async def press_key(self, key: str) -> str:
+        return await self.call_tool("browser_press_key", {"key": key})

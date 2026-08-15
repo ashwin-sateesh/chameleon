@@ -10,6 +10,7 @@ Requires Python 3.11+, Node.js 18+ (`npx`), and an LLM key: `CLAUDE_API_KEY` / `
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+playwright install chromium
 cp .env.example .env   # set CLAUDE_API_KEY or XAI_API_KEY
 ```
 
@@ -23,14 +24,20 @@ Smoke the headed browser (no agents, Sauce Demo login only):
 python scripts/smoke_mcp.py
 ```
 
-Run a task:
+Run a task in the terminal (headed OS browser):
 
 ```bash
 chameleon --site saucedemo --task "buy me a t-shirt" --task-id demo1
 python -m chameleon --site greenhouse --task "apply to this job for me" --task-id demo-gh
 ```
 
-Resume is automatic when `data/tasks/{task_id}.json` already exists.
+Open the two-pane web console (live page on the left, chat on the right):
+
+```bash
+chameleon ui
+```
+
+Then visit `http://127.0.0.1:8765`. Each **New chat** is its own `task_id` (resume, cookies, and transcript stay with that chat). Guardian questions are answered in the same composer. Type `stop` to halt a run.
 
 ## Docs
 

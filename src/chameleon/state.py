@@ -41,7 +41,9 @@ class TaskState(BaseModel):
     storage_state_path: str | None = None
     status: TaskStatus = TaskStatus.running
     pending_question: str | None = None
+    pending_options: list[str] = Field(default_factory=list)
     error: str | None = None
+    page_state: dict[str, Any] | None = None
 
 
 def save_state(state: TaskState) -> None:

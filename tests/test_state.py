@@ -53,6 +53,26 @@ def test_atomic_replace(tmp_path, monkeypatch):
     assert not task_state_path("x").with_suffix(".json.tmp").exists()
 
 
+def test_page_state_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHAMELEON_ROOT", str(tmp_path))
+    (tmp_path / "configs" / "sites").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='t'\n")
+    state = TaskState(
+        site="greenhouse",
+        task="apply",
+        task_id="form1",
+        page_state={
+            "url": "https://example.com/apply",
+            "fields": [{"id": "first_name", "name": "first_name", "value": "Jane", "type": "text"}],
+        },
+    )
+    save_state(state)
+    loaded = load_state("form1")
+    assert loaded is not None
+    assert loaded.page_state is not None
+    assert loaded.page_state["fields"][0]["value"] == "Jane"
+
+
 def test_missing_state_returns_none(tmp_path, monkeypatch):
     monkeypatch.setenv("CHAMELEON_ROOT", str(tmp_path))
     (tmp_path / "configs" / "sites").mkdir(parents=True)

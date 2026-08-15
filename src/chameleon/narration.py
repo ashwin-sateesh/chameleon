@@ -1,4 +1,4 @@
-"""Color-coded agent handoff logs."""
+"""Color-coded agent handoff logs (terminal + optional UI bridge)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ def say(agent: str, message: str) -> None:
     color = _COLORS.get(agent.lower(), DIM)
     label = agent.upper()
     print(f"{color}{BOLD}[{label}]{RESET} {color}{message}{RESET}", flush=True)
+    from chameleon.ui.events import emit
+
+    emit("log", agent=agent.lower(), message=message)
 
 
 def ask(question: str) -> None:
@@ -33,3 +36,6 @@ def ask(question: str) -> None:
 
 def answer(text: str) -> None:
     print(f"{ANSWER}{BOLD}[USER]{RESET} {ANSWER}{text}{RESET}", flush=True)
+    from chameleon.ui.events import emit
+
+    emit("log", agent="answer", message=text)
