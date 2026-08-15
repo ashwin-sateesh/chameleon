@@ -26,7 +26,7 @@ Allowed tools: browser_navigate, browser_click, browser_type, browser_snapshot.
 Playwright MCP click/type use `target` (the snapshot ref such as e12), not CSS selectors.
 You may also send `element` as a short human description.
 
-Return ONLY JSON:
+Return ONLY one JSON object. No markdown, no second object, no commentary.
 {
   "tool": "browser_click" | "browser_type" | "browser_navigate" | "browser_snapshot" | null,
   "arguments": { ... },
@@ -38,6 +38,12 @@ Set subgoal_complete true when the current sub-goal is already done (tool may be
 Do not invent credentials — use only those provided.
 Do not skip Guardian-sensitive work by guessing when answers are missing.
 After a successful login, prefer the inventory/app page over logging in again.
+The accessibility snapshot is already in the user message — do not call browser_snapshot
+unless the previous action changed the page and you have no current snapshot.
+For dropdowns/comboboxes: click the control, then browser_type the value from guardian answers.
+If a resume/file upload is required and you have no file path in guardian answers, do not loop
+on snapshots; propose nothing with subgoal_complete false only after you have asked via context
+— otherwise mark subgoal_complete true when the field is optional or already filled.
 """
 
 

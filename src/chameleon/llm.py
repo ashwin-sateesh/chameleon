@@ -67,11 +67,14 @@ def complete(prompt: str, *, system: str | None = None) -> str:
 
 def parse_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.DOTALL)
+    search_from = 0
+    fenced = re.search(r"```(?:json)?\s*\{", stripped)
     if fenced:
-        stripped = fenced.group(1)
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+        search_from = fenced.end() - 1
+    start = stripped.find("{", search_from)
+    if start == -1:
         raise ValueError(f"No JSON object in model output:\n{text[:500]}")
-    return json.loads(stripped[start : end + 1])
+    obj, _end = json.JSONDecoder().raw_decode(stripped[start:])
+    if not isinstance(obj, dict):
+        raise ValueError(f"Expected a JSON object, got {type(obj).__name__}")
+    return obj
