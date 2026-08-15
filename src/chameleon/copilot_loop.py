@@ -10,6 +10,7 @@ from typing import Any
 from chameleon.agents.guardian import guardian_copilot_action, guardian_copilot_interpret
 from chameleon.agents.navigator import navigator_copilot_step
 from chameleon.agents.planner import planner_observe
+from chameleon.ask_options import extract_ask_options
 from chameleon.fingerprint import (
     blocker_question,
     detect_blocker,
@@ -29,6 +30,7 @@ from chameleon.narration import ask as narrate_ask
 from chameleon.narration import say
 from chameleon.paths import session_dir
 from chameleon.profiles import SiteProfile
+from chameleon.ui.events import current_bridge
 from chameleon.state import (
     ActionRecord,
     CopilotPhase,
@@ -95,6 +97,7 @@ def _complete(state: TaskState) -> None:
     state.status = TaskStatus.completed
     state.phase = CopilotPhase.observing
     state.pending_question = None
+    state.pending_options = []
     state.consented_goal = None
     save_state(state)
     say("system", "Done.")
@@ -104,10 +107,14 @@ def _enter_ask(state: TaskState, question: str, *, proposed_goal: str | None = N
     state.phase = CopilotPhase.asking
     state.status = TaskStatus.paused_ask
     state.pending_question = question
+    state.pending_options = extract_ask_options(question)
     if proposed_goal:
         state.consented_goal = proposed_goal
     save_state(state)
     narrate_ask(question)
+    bridge = current_bridge.get()
+    if bridge is not None:
+        bridge.emit("ask", question=question, options=state.pending_options)
 
 
 def _append_event(state: TaskState, summary: str) -> None:
@@ -127,7 +134,9 @@ def _already_asked(state: TaskState, question: str) -> bool:
     return any(a.question == question for a in state.guardian_answers) or state.pending_question == question
 
 
-async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskState:
+async def run_copilot(
+    profile: SiteProfile, task: str, task_id: str, *, headless: bool = False
+) -> TaskState:
     existing = load_state(task_id)
     resuming = existing is not None
     if resuming:
@@ -169,6 +178,15 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
     nudged_fingerprint: str | None = None
     last_intents: list[str] = []
     last_tab_count = 0
+    live = None
+    bridge = current_bridge.get()
+
+    async def _wait_user() -> str:
+        if bridge is not None:
+            question = state.pending_question or "What do you want next? Type done to finish."
+            options = list(state.pending_options or [])
+            return await bridge.wait_answer(question, options)
+        return await read_user_line()
 
     def _request_stop() -> None:
         nonlocal stop
@@ -475,8 +493,26 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
     sess = session_dir(task_id)
     input_task: asyncio.Task[str] | None = None
     try:
-        async with PlaywrightMCP(user_data_dir=sess, output_dir=sess) as started:
+        cdp_endpoint = None
+        mcp_headless = headless
+        if bridge is not None:
+            from chameleon.ui.live_browser import LiveBrowser
+
+            live = LiveBrowser(user_data_dir=sess, emit=bridge.emit)
+            await live.start()
+            bridge.live = live
+            cdp_endpoint = live.endpoint
+            mcp_headless = False
+            say("system", "Live page is streaming into the console.")
+        async with PlaywrightMCP(
+            user_data_dir=sess,
+            output_dir=sess,
+            headless=mcp_headless,
+            cdp_endpoint=cdp_endpoint,
+        ) as started:
             mcp = started
+            if bridge is not None:
+                bridge.mcp = mcp
             snapshot = await _restore_browser(mcp, state, profile)
             latest_snapshot = snapshot
             await _persist_browser(mcp, state, snapshot)
@@ -504,13 +540,19 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                 if state.interpreted_fingerprint is None and state.phase != CopilotPhase.asking:
                     state.interpreted_fingerprint = fp
                     save_state(state)
-                say("system", f"Resumed. Tell me what to do, or type done.")
+                say("system", "Resumed. Tell me what to do, or type done.")
                 if state.pending_question:
                     narrate_ask(state.pending_question)
+                    if bridge is not None:
+                        bridge.emit(
+                            "ask",
+                            question=state.pending_question,
+                            options=list(state.pending_options or []),
+                        )
 
-            input_task = asyncio.create_task(read_user_line())
+            input_task = asyncio.create_task(_wait_user())
             while state.status in {TaskStatus.running, TaskStatus.paused_ask}:
-                if stop:
+                if stop or (bridge is not None and bridge.stop):
                     raise StopRequested
                 poll_task = asyncio.create_task(asyncio.sleep(_poll_seconds()))
                 stop_task = asyncio.create_task(stop_event.wait())
@@ -525,7 +567,7 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                             await extra
                         except asyncio.CancelledError:
                             pass
-                if stop or stop_task in done:
+                if stop or stop_task in done or (bridge is not None and bridge.stop):
                     raise StopRequested
                 if input_task in done:
                     try:
@@ -536,7 +578,7 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                         raise
                     except Exception:  # noqa: BLE001
                         text = "done"
-                    input_task = asyncio.create_task(read_user_line())
+                    input_task = asyncio.create_task(_wait_user())
                     text = (text or "").strip()
                     if text:
                         await _on_user_text(text)
@@ -575,4 +617,9 @@ async def run_copilot(profile: SiteProfile, task: str, task_id: str) -> TaskStat
                 await input_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
+        if bridge is not None:
+            bridge.mcp = None
+            bridge.live = None
+        if live is not None:
+            await live.close()
     return state

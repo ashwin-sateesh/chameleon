@@ -159,7 +159,8 @@ async def _restore_browser(mcp: PlaywrightMCP, state: TaskState, profile: SitePr
         except Exception:  # noqa: BLE001
             await asyncio.sleep(0.6)
     else:
-        await asyncio.sleep(0.6)
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            await asyncio.sleep(0.6)
     if live is not None and state.page_state:
         try:
             await live.restore_page_state(state.page_state)
@@ -287,7 +288,7 @@ async def _run_task_inner(
     if profile.interaction_mode == "copilot":
         from chameleon.copilot_loop import run_copilot
 
-        return await run_copilot(profile, resolved, task_id)
+        return await run_copilot(profile, resolved, task_id, headless=headless)
     return await _run_execute(profile, resolved, task_id, headless=headless)
 
 

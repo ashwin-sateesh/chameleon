@@ -42,7 +42,7 @@ Open the two-pane web console (live page on the left, chat on the right):
 chameleon ui
 ```
 
-Then visit `http://127.0.0.1:8765`. Each **New chat** is its own `task_id` (resume, cookies, and transcript stay with that chat). Guardian questions are answered in the same composer. Type `stop` to halt a run.
+Then visit `http://127.0.0.1:8765`. Type `restaurants in San Francisco` or `stays near SFO` (it infers Maps / Airbnb), or pick a site when asked. Each **New chat** is its own `task_id`. Guardian questions are answered in the same composer. Type `done` or `stop` to halt a run.
 
 ## Docs
 

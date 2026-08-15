@@ -17,7 +17,7 @@ from chameleon.state import CopilotPhase, TaskStatus, load_state
 class FakeMapsMCP:
     instances: list["FakeMapsMCP"] = []
 
-    def __init__(self, *, user_data_dir: Path, output_dir: Path) -> None:
+    def __init__(self, *, user_data_dir: Path, output_dir: Path, **_: object) -> None:
         self.user_data_dir = user_data_dir
         self.output_dir = output_dir
         self.url = "about:blank"
