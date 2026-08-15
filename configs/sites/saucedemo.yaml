@@ -1,0 +1,18 @@
+name: Sauce Demo
+base_url: https://www.saucedemo.com/
+requires_login: true
+login:
+  username: standard_user
+  password: secret_sauce
+task_type: shopping
+checklist_template:
+  - goal: log in with the provided credentials
+    risk: none
+  - goal: find the item matching the user's request
+    risk: ambiguous_choice
+  - goal: add the chosen item to the cart
+    risk: none
+  - goal: go to checkout and fill shipping info
+    risk: needs_user_info
+  - goal: confirm and finish the order
+    risk: irreversible

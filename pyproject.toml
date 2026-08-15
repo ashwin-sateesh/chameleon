@@ -1,0 +1,33 @@
+[project]
+name = "chameleon"
+version = "0.1.0"
+description = "Stateful multi-agent browser automation that knows when not to act alone"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ashwin Sateesh Kumar" }]
+dependencies = [
+    "anthropic",
+    "xai-sdk",
+    "mcp",
+    "pyyaml",
+    "python-dotenv",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+chameleon = "chameleon.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
